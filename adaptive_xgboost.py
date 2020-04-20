@@ -19,7 +19,7 @@ class AdaptiveXGBoostClassifier(BaseSKMObject, ClassifierMixin):
                  max_window_size=1000,
                  min_window_size=None,
                  detect_drift=False,
-                 update_strategy='push'):
+                 update_strategy='replace'):
         """
         Adaptive XGBoost classifier.
 
@@ -44,10 +44,26 @@ class AdaptiveXGBoostClassifier(BaseSKMObject, ClassifierMixin):
         detect_drift: bool (default=False)
             If set will use a drift detector (ADWIN).
 
-        update_strategy: str (default='push')
+        update_strategy: str (default='replace')
             | The update strategy to use:
             | 'push' - the ensemble resembles a queue
             | 'replace' - oldest ensemble members are replaced by newer ones
+
+        Notes
+        -----
+        The Adaptive XGBoost [1]_ (AXGB) classifier is an adaptation of the
+        XGBoost algorithm for evolving data streams. AXGB creates new members
+        of the ensemble from mini-batches of data as new data becomes
+        available.  The maximum ensemble  size is fixed, but learning does not
+        stop once this size is reached, the ensemble is updated on new data to
+        ensure consistency with the current data distribution.
+
+        References
+        ----------
+        .. [1] Montiel, Jacob, Mitchell, Rory, Frank, Eibe, Pfahringer,
+           Bernhard, Abdessalem, Talel, and Bifet, Albert. “AdaptiveXGBoost for
+           Evolving Data Streams”. In:IJCNN’20. International Joint Conference
+           on Neural Networks. 2020. Forthcoming.
         """
         super().__init__()
         self.learning_rate = learning_rate
@@ -163,19 +179,19 @@ class AdaptiveXGBoostClassifier(BaseSKMObject, ClassifierMixin):
         self.window_size = self._dynamic_window_size
 
     def _train_on_mini_batch(self, X, y):
-        if self.update_strategy == self._PUSH_STRATEGY:
+        if self.update_strategy == self._REPLACE_STRATEGY:
+            booster = self._train_booster(X, y, self._model_idx)
+            # Update ensemble
+            self._ensemble[self._model_idx] = booster
+            self._samples_seen += X.shape[0]
+            self._update_model_idx()
+        else:   # self.update_strategy == self._PUSH_STRATEGY
             booster = self._train_booster(X, y, len(self._ensemble))
             # Update ensemble
             if len(self._ensemble) == self.n_estimators:
                 self._ensemble.pop(0)
             self._ensemble.append(booster)
             self._samples_seen += X.shape[0]
-        else:   # self._update_strategy == self._REPLACE_STRATEGY
-            booster = self._train_booster(X, y, self._model_idx)
-            # Update ensemble
-            self._ensemble[self._model_idx] = booster
-            self._samples_seen += X.shape[0]
-            self._update_model_idx()
 
     def _train_booster(self, X: np.ndarray, y: np.ndarray, last_model_idx: int):
         d_mini_batch_train = xgb.DMatrix(X, y.astype(int))
@@ -214,10 +230,10 @@ class AdaptiveXGBoostClassifier(BaseSKMObject, ClassifierMixin):
 
         """
         if self._ensemble:
-            if self.update_strategy == self._PUSH_STRATEGY:
-                trees_in_ensemble = len(self._ensemble)
-            else:   # self._update_strategy == self._REPLACE_STRATEGY
+            if self.update_strategy == self._REPLACE_STRATEGY:
                 trees_in_ensemble = sum(i is not None for i in self._ensemble)
+            else:   # self.update_strategy == self._PUSH_STRATEGY
+                trees_in_ensemble = len(self._ensemble)
             if trees_in_ensemble > 0:
                 d_test = xgb.DMatrix(X)
                 for i in range(trees_in_ensemble - 1):
