@@ -28,6 +28,7 @@ AXGBr = AdaptiveXGBoostClassifier(update_strategy='replace',
 
 stream = ConceptDriftStream(random_state=1000,
                             position=5000)
+# stream.prepare_for_use()   # Required for skmultiflow v0.4.1
 
 evaluator = EvaluatePrequential(pretrain_size=0,
                                 max_samples=20000,
