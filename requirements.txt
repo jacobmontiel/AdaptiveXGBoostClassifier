@@ -1,2 +1,2 @@
 xgboost>=0.90
-scikit-multiflow>=0.4.1
+scikit-multiflow>=0.5.3
